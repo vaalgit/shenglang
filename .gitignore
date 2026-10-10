@@ -1,0 +1,4 @@
+test/runs/
+__pycache__/
+*.wav
+*.mp3

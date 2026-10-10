@@ -1,0 +1,886 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#111214">
+</head>
+<body>
+<title>聲浪引擎</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Saira+Semi+Condensed:wght@500;600;700&family=Noto+Sans+TC:wght@400;500;700&display=swap">
+<style>
+/* Layout: instrument-cluster left (the gauge is the product), controls stacked right; single column on phones.
+   Deliberately single-theme: a night-cluster look with amber backlight, like the dial it imitates. */
+:root {
+  --bg: #111214;
+  --panel: #191a1d;
+  --rim: #2a2c30;
+  --ink: #ece8df;
+  --mute: #8d8f94;
+  --amber: #ffad1f;
+  --red: #ff4433;
+  --good: #57c98a;
+  --f-num: 'Saira Semi Condensed', 'Noto Sans TC', system-ui, sans-serif;
+  --f-body: 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', system-ui, sans-serif;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { background: var(--bg); color: var(--ink); }
+body { font-family: var(--f-body); font-size: 15px; line-height: 1.55; padding-inline: 16px; padding-block: 12px 28px; }
+button, select, input { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+
+.top { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; max-width: 1280px; margin: 0 auto 12px; }
+.brand { display: flex; align-items: baseline; gap: 10px; }
+.brand h1 { margin: 0; font-family: var(--f-body); font-weight: 700; font-size: 26px; letter-spacing: 0.08em; }
+.brand span { color: var(--mute); font-size: 13px; }
+.pill { font-size: 13px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--rim); color: var(--mute); display: inline-flex; align-items: center; gap: 6px; }
+.pill::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--rim); }
+.pill[data-state="good"] { color: var(--ink); } .pill[data-state="good"]::before { background: var(--good); }
+.pill[data-state="warn"]::before { background: var(--amber); }
+.pill[data-state="bad"] { color: var(--red); } .pill[data-state="bad"]::before { background: var(--red); }
+
+.grid { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 20px; max-width: 1280px; margin: 0 auto; }
+@media (max-width: 820px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+
+.cluster { background: var(--panel); border: 1px solid var(--rim); border-radius: 18px; padding: 16px; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+#tach { width: 100%; aspect-ratio: 1.25 / 1; max-width: 100%; display: block; }
+.readout { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.read { display: flex; flex-direction: column; gap: 2px; }
+.read b { font-family: var(--f-num); font-weight: 600; font-size: 34px; line-height: 1; font-variant-numeric: tabular-nums; }
+.read small { color: var(--mute); font-size: 12px; letter-spacing: 0.06em; }
+.loadwrap { height: 6px; background: var(--rim); border-radius: 3px; overflow: hidden; margin-top: 10px; }
+#loadBar { height: 100%; background: var(--amber); transform-origin: left; transform: scaleX(0); transition: transform 80ms linear; }
+
+.pads { display: flex; gap: 10px; flex-wrap: wrap; }
+.pad { flex: 1 1 120px; min-height: 64px; border-radius: 12px; border: 1px solid var(--rim); background: var(--bg); font-size: 17px; font-weight: 700; letter-spacing: 0.1em; touch-action: none; user-select: none; -webkit-user-select: none; }
+.pad.down { background: var(--rim); }
+#gas { border-color: var(--amber); color: var(--amber); }
+#gas.down { background: var(--amber); color: var(--bg); }
+#brake.down { border-color: var(--red); color: var(--red); }
+.pad.small { flex: 1 1 90px; min-height: 52px; font-size: 15px; }
+
+.side { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+#start { min-height: 72px; border-radius: 999px; border: 2px solid var(--red); background: transparent; color: var(--ink); font-size: 20px; font-weight: 700; letter-spacing: 0.2em; }
+#start.on { background: var(--red); color: #fff; }
+.group { display: flex; flex-direction: column; gap: 8px; }
+.label { color: var(--mute); font-size: 12px; letter-spacing: 0.12em; }
+.seg { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; border: 1px solid var(--rim); border-radius: 10px; overflow: hidden; }
+.seg button { padding: 10px 8px; background: transparent; border: 0; border-right: 1px solid var(--rim); }
+.seg button:last-child { border-right: 0; }
+.seg button[aria-pressed="true"] { background: var(--rim); color: var(--amber); font-weight: 700; }
+.row2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+@media (max-width: 420px) { .row2 { grid-template-columns: minmax(0, 1fr); } }
+select { width: 100%; padding: 10px; border-radius: 10px; border: 1px solid var(--rim); background: var(--panel); }
+input[type=range] { width: 100%; accent-color: var(--amber); }
+
+#engines { display: flex; flex-direction: column; gap: 8px; }
+.eng { text-align: left; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--rim); background: var(--panel); display: grid; gap: 2px; }
+.eng[aria-pressed="true"] { border-color: var(--amber); }
+.eng-name { font-weight: 700; font-size: 16px; }
+.eng[aria-pressed="true"] .eng-name { color: var(--amber); }
+.eng-meta { font-family: var(--f-num); font-size: 13px; color: var(--mute); font-variant-numeric: tabular-nums; }
+.eng-note { font-size: 13px; color: var(--mute); }
+
+.note { font-size: 13px; color: var(--mute); border-top: 1px solid var(--rim); padding-top: 12px; margin: 0; }
+.note b { color: var(--ink); font-weight: 500; }
+.help { font-size: 13px; border: 1px solid var(--red); border-radius: 10px; padding: 10px 12px; margin: 0; }
+kbd { font-family: var(--f-num); border: 1px solid var(--rim); border-radius: 4px; padding: 0 5px; font-size: 12px; }
+@media (prefers-reduced-motion: reduce) { #loadBar { transition: none; } }
+</style>
+
+<header class="top">
+  <div class="brand"><h1>聲浪</h1><span>給電動車的引擎聲</span></div>
+  <span class="pill" id="gps" data-state="">GPS 未使用</span>
+</header>
+
+<main class="grid">
+  <section class="cluster" aria-label="儀表">
+    <canvas id="tach" aria-label="轉速表"></canvas>
+    <div>
+      <div class="readout">
+        <div class="read"><b id="spd">0</b><small>KM/H</small></div>
+        <div class="read"><b id="rpmNum">0</b><small>RPM</small></div>
+        <div class="read"><b id="loadTxt" style="font-size:22px;line-height:1.55">熄火</b><small>引擎狀態</small></div>
+      </div>
+      <div class="loadwrap" aria-hidden="true"><div id="loadBar"></div></div>
+    </div>
+    <div class="pads" id="simPad">
+      <button class="pad" id="brake" type="button">煞車</button>
+      <button class="pad" id="gas" type="button">油門</button>
+    </div>
+    <div class="pads" id="manPad">
+      <button class="pad small" id="downBtn" type="button">− 降檔</button>
+      <button class="pad small" id="blip" type="button">補油</button>
+      <button class="pad small" id="upBtn" type="button">升檔 +</button>
+    </div>
+  </section>
+
+  <aside class="side">
+    <button id="start" type="button">發動引擎</button>
+
+    <div class="row2">
+      <div class="group">
+        <span class="label">速度來源</span>
+        <div class="seg" role="group" aria-label="速度來源">
+          <button type="button" data-mode="sim">模擬</button>
+          <button type="button" data-mode="gps">GPS</button>
+        </div>
+      </div>
+      <div class="group">
+        <span class="label">變速箱</span>
+        <div class="seg" role="group" aria-label="變速箱">
+          <button type="button" data-trans="auto">自排</button>
+          <button type="button" data-trans="manual">手排</button>
+        </div>
+      </div>
+    </div>
+
+    <p class="help" id="gpsHelp" hidden>這個畫面讀不到位置。GPS 模式要在你自己的 HTTPS 網址上開啟，並允許瀏覽器使用位置。在這之前可以先用「模擬」試聽。</p>
+
+    <div class="row2">
+      <label class="group"><span class="label">你的車</span>
+        <select id="car">
+          <option value="rwd">後驅標準版</option>
+          <option value="lr">長程雙馬達</option>
+          <option value="perf">Performance</option>
+        </select>
+      </label>
+      <label class="group"><span class="label">音量</span>
+        <input id="vol" type="range" min="0" max="1" step="0.01" value="0.7">
+      </label>
+    </div>
+
+    <div class="group">
+      <span class="label">引擎</span>
+      <div id="engines"></div>
+    </div>
+
+    <p class="note"><b>模擬模式</b>按住油門加速、放開就收油回火。鍵盤：<kbd>↑</kbd> 油門 <kbd>↓</kbd> 煞車 <kbd>空白</kbd> 補油 <kbd>←</kbd><kbd>→</kbd> 換檔。<br><b>在車上</b>用 GPS 模式，方向盤的上一首／下一首可以換檔，按一下是補油。</p>
+  </aside>
+</main>
+
+<script>
+class EngineDSP {
+  constructor(sr) {
+    this.sr = sr;
+    this.phase = 0; this.rpm = 0; this.tRpm = 0; this.load = 0; this.tLoad = 0;
+    this.on = false; this.cut = false; this.starter = false;
+    this.kR = 1 - Math.exp(-1 / (sr * 0.025));
+    this.kL = 1 - Math.exp(-1 / (sr * 0.04));
+    this.kBu = 1 - Math.exp(-1 / (sr * 0.55));
+    this.kBd = 1 - Math.exp(-1 / (sr * 0.25));
+    this.kBov = Math.exp(-1 / (sr * 0.3));
+    this.P = 48;
+    this.pT = new Float32Array(this.P); this.pLen = new Float32Array(this.P);
+    this.pAmp = new Float32Array(this.P); this.pNz = new Float32Array(this.P);
+    this.pBank = new Uint8Array(this.P); this.pAct = new Uint8Array(this.P);
+    this.boost = 0; this.bov = 0; this.peakLoad = 0; this.wPh = 0; this.stPh = 0;
+    this.h1 = 0; this.h2 = 0;
+    this.lpL = 0; this.lpL2 = 0; this.lpR = 0; this.lpR2 = 0;
+    this.dxL = 0; this.dyL = 0; this.dxR = 0; this.dyR = 0;
+    this.seed = 22222; this.eng = null; this.preGain = 1; this.ovT = 0;
+  }
+  rand() {
+    let x = this.seed | 0; x ^= x << 13; x ^= x >>> 17; x ^= x << 5; this.seed = x;
+    return (x >>> 0) / 4294967296;
+  }
+  bp(f, q) {
+    const w = 2 * Math.PI * Math.min(f, this.sr * 0.45) / this.sr, al = Math.sin(w) / (2 * q), a0 = 1 + al;
+    return { b0: al / a0, b2: -al / a0, a1: -2 * Math.cos(w) / a0, a2: (1 - al) / a0, z1: 0, z2: 0 };
+  }
+  run(f, x) {
+    const y = f.b0 * x + f.z1;
+    f.z1 = -f.a1 * y + f.z2;
+    f.z2 = f.b2 * x - f.a2 * y;
+    return y;
+  }
+  setEngine(e) {
+    this.eng = e;
+    this.n = e.offsets.length;
+    this.off = e.offsets.map(o => ((o % 1) + 1) % 1);
+    this.nb = Math.max.apply(null, e.banks) + 1;
+    const pipes = Array.isArray(e.pipeHz) ? e.pipeHz : [e.pipeHz, e.pipeHz * 1.07];
+    this.res = []; this.dl = []; this.di = [];
+    for (let b = 0; b < this.nb; b++) {
+      this.res.push(e.res.map(r => Object.assign(this.bp(r[0] * (b ? 1.04 : 1), r[1]), { g: r[2] })));
+      this.dl.push(new Float32Array(Math.max(8, Math.round(this.sr / pipes[b]))));
+      this.di.push(0);
+    }
+    this.bovF = this.bp(2600, 1.3);
+    this.pAct.fill(0);
+    this.preGain = e.level || 1;
+  }
+  addPulse(b, amp, nz, len) {
+    for (let k = 0; k < this.P; k++) {
+      if (!this.pAct[k]) {
+        this.pAct[k] = 1; this.pT[k] = 0; this.pLen[k] = Math.max(2, len);
+        this.pAmp[k] = amp; this.pNz[k] = nz; this.pBank[k] = b; return;
+      }
+    }
+  }
+  fire(i, cps) {
+    const e = this.eng, sr = this.sr, b = e.banks[i];
+    const L = this.load, rN = Math.min(1.1, this.rpm / e.redline);
+    if (this.cut && this.rand() < 0.7) {
+      if (this.rand() < 0.2 * e.pops) this.addPulse(b, 1.5 + this.rand(), 2.4, 0.003 * sr);
+      return;
+    }
+    let amp = (0.3 + 0.7 * Math.pow(L, 0.8)) * e.gains[i] * (0.92 + 0.16 * this.rand()) * (0.75 + 0.45 * rN);
+    if (this.starter) amp *= this.rand() < 0.5 ? 0 : 0.35;
+    const interval = sr / (cps * this.n);
+    const len = Math.min(Math.max(e.pulse * interval, 0.0012 * sr), 0.012 * sr);
+    const nz = e.noise * (L < 0.08 ? 2.2 : 1);
+    this.addPulse(b, amp, nz, len);
+    // Overrun crackle: a burst right after lifting off, thinning out as the exhaust cools.
+    // Rate is in pops per second, converted to a chance per firing.
+    const popRate = (3 + 12 * rN) * e.pops * (Math.exp(-this.ovT / 1.2) + 0.12);
+    if (L < 0.08 && this.rpm > 2200 && !this.starter && this.rand() < popRate / (cps * this.n)) {
+      this.addPulse(b, 1.1 + 0.9 * this.rand(), 2.5, 0.0025 * sr + this.rand() * 0.004 * sr);
+    }
+  }
+  process(outL, outR, N) {
+    const e = this.eng;
+    if (!e) { outL.fill(0); if (outR !== outL) outR.fill(0); return; }
+    const sr = this.sr, TAU = Math.PI * 2;
+    for (let s = 0; s < N; s++) {
+      this.rpm += (this.tRpm - this.rpm) * this.kR;
+      this.load += (this.tLoad - this.load) * this.kL;
+      const rN = Math.min(1.1, this.rpm / e.redline), L = this.load;
+      this.ovT = L < 0.08 ? this.ovT + 1 / sr : 0;
+      const cps = Math.max(0, this.rpm) / 120;
+      const p0 = this.phase, p1 = p0 + cps / sr;
+      if (this.on && cps > 0.5) {
+        for (let i = 0; i < this.n; i++) {
+          const o = this.off[i];
+          if ((o > p0 && o <= p1) || (o + 1 > p0 && o + 1 <= p1)) this.fire(i, cps);
+        }
+      }
+      this.phase = p1 >= 1 ? p1 - 1 : p1;
+
+      let x0 = 0, x1 = 0;
+      for (let k = 0; k < this.P; k++) {
+        if (!this.pAct[k]) continue;
+        const u = this.pT[k] / this.pLen[k];
+        let v = Math.sin(Math.PI * u) * (1 - 0.45 * u) * this.pAmp[k];
+        if (this.pNz[k] > 0) v += (this.rand() * 2 - 1) * this.pAmp[k] * this.pNz[k] * (1 - u) * 0.5;
+        if (this.pBank[k]) x1 += v; else x0 += v;
+        if (++this.pT[k] >= this.pLen[k]) this.pAct[k] = 0;
+      }
+
+      const y0 = this.bank(0, x0);
+      const y1 = this.nb > 1 ? this.bank(1, x1) : 0;
+
+      // intake hiss
+      const wn = this.rand() * 2 - 1;
+      this.h1 += 0.35 * (wn - this.h1);
+      this.h2 += 0.03 * (this.h1 - this.h2);
+      const hiss = (this.h1 - this.h2) * (this.on ? 0.012 + 0.05 * L * rN : 0);
+
+      // turbo
+      let tb = 0;
+      if (e.turbo > 0) {
+        const tgt = this.on && L > 0.3 ? L * Math.min(1, rN * 1.6) : 0;
+        this.boost += (tgt - this.boost) * (tgt > this.boost ? this.kBu : this.kBd);
+        if (L > 0.55) this.peakLoad = 1;
+        if (this.peakLoad && L < 0.15) {
+          if (this.boost > 0.35) this.bov = Math.max(this.bov, this.boost);
+          this.peakLoad = 0;
+        }
+        this.wPh += TAU * (1800 + 5200 * this.boost) / sr;
+        if (this.wPh > TAU) this.wPh -= TAU;
+        tb = Math.sin(this.wPh) * this.boost * this.boost * 0.03 * e.turbo;
+        if (this.bov > 0.001) {
+          tb += this.run(this.bovF, wn) * this.bov * 0.5 * e.turbo;
+          this.bov *= this.kBov;
+        }
+      }
+
+      // starter motor whine
+      let st = 0;
+      if (this.starter) {
+        this.stPh += TAU * (160 + this.rpm * 0.4) / sr;
+        if (this.stPh > TAU) this.stPh -= TAU;
+        st = (Math.sin(this.stPh) + 0.4 * Math.sin(this.stPh * 3)) * 0.05;
+      }
+
+      const drive = e.drive * (0.6 + 0.6 * L) * this.preGain;
+      const sl = this.nb > 1 ? y0 * 0.68 + y1 * 0.32 : y0;
+      const srr = this.nb > 1 ? y0 * 0.32 + y1 * 0.68 : y0;
+      let l = Math.tanh(sl * drive) * 0.55 + hiss + tb + st;
+      let r = Math.tanh(srr * drive) * 0.55 + hiss + tb + st;
+
+      const fc = 700 + 7000 * e.bright * (0.3 + 0.7 * Math.min(1, rN)) * (0.6 + 0.4 * L);
+      const a = 1 - Math.exp(-TAU * fc / sr);
+      this.lpL += a * (l - this.lpL); this.lpL2 += a * (this.lpL - this.lpL2);
+      this.lpR += a * (r - this.lpR); this.lpR2 += a * (this.lpR - this.lpR2);
+      l = this.lpL2; r = this.lpR2;
+
+      const oL = l - this.dxL + 0.995 * this.dyL; this.dxL = l; this.dyL = oL;
+      const oR = r - this.dxR + 0.995 * this.dyR; this.dxR = r; this.dyR = oR;
+      outL[s] = oL;
+      if (outR !== outL) outR[s] = oR;
+    }
+  }
+  bank(b, x) {
+    const e = this.eng, rs = this.res[b];
+    let y = x * e.direct;
+    for (let j = 0; j < rs.length; j++) y += this.run(rs[j], x) * rs[j].g;
+    const d = this.dl[b]; let i = this.di[b];
+    const c = y + e.pipeFb * d[i];
+    d[i] = c; i++; if (i >= d.length) i = 0; this.di[b] = i;
+    return c;
+  }
+  msg(d) {
+    if (d.engine) this.setEngine(d.engine);
+    if ('rpm' in d) this.tRpm = d.rpm;
+    if ('load' in d) this.tLoad = d.load;
+    if ('on' in d) this.on = d.on;
+    if ('cut' in d) this.cut = d.cut;
+    if ('starter' in d) this.starter = d.starter;
+  }
+}
+
+const ev = n => Array.from({ length: n }, (_, i) => i / n);
+const ENGINES = [
+  {
+    id: 'i5', name: '直列五缸 2.5 渦輪', note: '奇數缸的不等長排氣，帶出獨特的顫音',
+    cyl: 5, layout: '直列 5', power: '400 匹', idle: 880, redline: 7000,
+    offsets: [0, 0.206, 0.396, 0.608, 0.797], banks: [0, 0, 0, 0, 0],
+    gains: [1, 0.78, 0.93, 0.68, 0.88],
+    res: [[110, 4, 1.0], [260, 6, 0.6], [720, 8, 0.25], [1600, 6, 0.12]],
+    pipeHz: 135, pipeFb: 0.45, direct: 0.5, noise: 0.25, pulse: 0.45,
+    drive: 2.2, bright: 0.6, turbo: 0.8, pops: 1.0, level: 1,
+    gears: [3.57, 2.53, 1.68, 1.18, 0.96, 0.8, 0.67], fd: 3.3, box: '七速雙離合'
+  },
+  {
+    id: 'f6', name: '水平對臥六缸 4.0 自然進氣', note: '9000 轉的高亢嘶吼，越拉越尖',
+    cyl: 6, layout: '水平對臥 6', power: '510 匹', idle: 950, redline: 9000,
+    offsets: ev(6), banks: [0, 1, 0, 1, 0, 1],
+    gains: [1, 0.95, 0.98, 0.93, 1, 0.96],
+    res: [[180, 5, 0.8], [440, 7, 0.6], [1100, 9, 0.4], [2400, 6, 0.25]],
+    pipeHz: 190, pipeFb: 0.35, direct: 0.45, noise: 0.35, pulse: 0.35,
+    drive: 2.8, bright: 1.0, turbo: 0, pops: 0.6, level: 1.25,
+    gears: [3.75, 2.38, 1.72, 1.34, 1.11, 0.96, 0.84], fd: 4.47, box: '七速雙離合'
+  },
+  {
+    id: 'i6', name: '直列六缸 3.0 雙渦輪', note: '平順綿密，渦輪哨音和洩壓閥最明顯',
+    cyl: 6, layout: '直列 6', power: '320 匹', idle: 800, redline: 6800,
+    offsets: ev(6), banks: [0, 0, 0, 0, 0, 0],
+    gains: [1, 0.97, 0.99, 0.96, 1, 0.98],
+    res: [[120, 5, 1.0], [330, 6, 0.5], [900, 8, 0.25], [2000, 6, 0.1]],
+    pipeHz: 150, pipeFb: 0.4, direct: 0.5, noise: 0.2, pulse: 0.5,
+    drive: 1.8, bright: 0.5, turbo: 1.0, pops: 0.5, level: 1.1,
+    gears: [3.83, 2.36, 1.69, 1.31, 1.0, 0.79], fd: 3.27, box: '六速手排'
+  },
+  {
+    id: 'v8', name: 'V8 4.0 雙渦輪 十字曲軸', note: '左右兩排不規則交錯，低沉的隆隆聲',
+    cyl: 8, layout: 'V 型 8', power: '600 匹', idle: 700, redline: 6800,
+    offsets: ev(8), banks: [0, 1, 0, 1, 1, 0, 1, 0],
+    gains: [1, 0.9, 0.95, 1, 0.85, 0.97, 0.92, 0.88],
+    res: [[85, 4, 1.2], [210, 5, 0.7], [520, 7, 0.3], [1300, 6, 0.12]],
+    pipeHz: [95, 103], pipeFb: 0.5, direct: 0.55, noise: 0.2, pulse: 0.55,
+    drive: 2.0, bright: 0.45, turbo: 0.5, pops: 1.2, level: 2.2,
+    gears: [4.71, 3.14, 2.11, 1.67, 1.29, 1.0, 0.84, 0.67], fd: 3.2, box: '八速自排'
+  },
+  {
+    id: 'i4', name: '直列四缸 2.0 渦輪', note: '輕快的鋼砲聲，換檔瞬間「噗」一聲',
+    cyl: 4, layout: '直列 4', power: '245 匹', idle: 850, redline: 6700,
+    offsets: ev(4), banks: [0, 0, 0, 0],
+    gains: [1, 0.95, 1, 0.93],
+    res: [[140, 5, 0.9], [380, 6, 0.55], [1000, 8, 0.3], [2200, 6, 0.15]],
+    pipeHz: 170, pipeFb: 0.35, direct: 0.5, noise: 0.3, pulse: 0.45,
+    drive: 2.4, bright: 0.7, turbo: 0.7, pops: 1.0, level: 1.4, shiftPop: true,
+    gears: [3.5, 2.3, 1.6, 1.2, 0.95, 0.78, 0.65], fd: 3.9, box: '七速雙離合'
+  }
+];
+
+const $ = s => document.querySelector(s);
+const CARS = {
+  rwd: { name: '後驅標準版', a0: 4.6, pm: 125 },
+  lr: { name: '長程雙馬達', a0: 6.2, pm: 160 },
+  perf: { name: 'Performance', a0: 8.0, pm: 185 }
+};
+const TIRE = 2.05;
+const S = {
+  eng: ENGINES[0], mode: 'sim', trans: 'auto', car: 'lr', vol: 0.7,
+  running: false, startT: 0, v: 0, a: 0, gear: 0, rpm: 0, load: 0, cut: false,
+  lastShift: -9, shiftDir: 0, thr: 0, thrIn: 0, brk: 0, blip: false, blipUntil: 0,
+  freeRpm: 0, sendLoad: 0, gps: 'off', moving: false, coast: true, overrun: false, ovHold: 0, peak: 0, loadAtShift: 0
+};
+// GPS speed/acceleration tracker: a 2-state Kalman filter [speed, acceleration].
+// Works for 1 Hz and 10 Hz receivers, and for browsers that only report positions.
+const G = { have: false, v: 0, a: 0, t: 0, gap: 0.1, P: [[1, 0], [0, 4]], anchor: null, hasSpeed: true, watch: null };
+const JERK = 15; // how quickly a driver can change acceleration (m/s^3)^2/Hz
+
+let actx = null, node = null, local = null, master = null, audioEl = null;
+
+function post(d) {
+  if (node) node.port.postMessage(d);
+  else if (local) local.msg(d);
+}
+
+async function initAudio() {
+  if (actx) return;
+  const AC = window.AudioContext || window.webkitAudioContext;
+  actx = new AC({ latencyHint: 'interactive' });
+  master = actx.createGain();
+  master.gain.value = S.vol;
+  const comp = actx.createDynamicsCompressor();
+  comp.threshold.value = -12; comp.ratio.value = 5; comp.attack.value = 0.004; comp.release.value = 0.15;
+  const makeup = actx.createGain(); makeup.gain.value = 1.6;
+  try {
+    const src = EngineDSP.toString() +
+      '\nclass P extends AudioWorkletProcessor{constructor(){super();this.d=new EngineDSP(sampleRate);this.port.onmessage=e=>this.d.msg(e.data)}' +
+      'process(i,o){const c=o[0];this.d.process(c[0],c[1]||c[0],c[0].length);return true}}\nregisterProcessor("engine-proc",P);';
+    const url = URL.createObjectURL(new Blob([src], { type: 'application/javascript' }));
+    await actx.audioWorklet.addModule(url);
+    node = new AudioWorkletNode(actx, 'engine-proc', { outputChannelCount: [2] });
+    node.connect(comp);
+  } catch (err) {
+    local = new EngineDSP(actx.sampleRate);
+    const sp = actx.createScriptProcessor(1024, 0, 2);
+    sp.onaudioprocess = ev => {
+      const b = ev.outputBuffer;
+      local.process(b.getChannelData(0), b.getChannelData(1), b.length);
+    };
+    sp.connect(comp);
+    node = null;
+  }
+  comp.connect(makeup); makeup.connect(master);
+  // Route through a media element so the car treats the page as its media source
+  // (steering-wheel buttons then reach the Media Session handlers below).
+  let routed = false;
+  try {
+    const dest = actx.createMediaStreamDestination();
+    audioEl = new Audio();
+    audioEl.srcObject = dest.stream;
+    master.connect(dest);
+    await audioEl.play();
+    routed = true;
+  } catch (e) {
+    try { master.disconnect(); } catch (_) {}
+  }
+  if (!routed) master.connect(actx.destination);
+  setupMediaSession();
+  post({ engine: S.eng });
+}
+
+function setupMediaSession() {
+  if (!('mediaSession' in navigator)) return;
+  const ms = navigator.mediaSession;
+  try {
+    ms.metadata = new MediaMetadata({ title: S.eng.name, artist: '聲浪引擎' });
+    ms.setActionHandler('nexttrack', () => shift(1, true));
+    ms.setActionHandler('previoustrack', () => shift(-1, true));
+    const blipOnce = () => { blipPulse(); if (audioEl) audioEl.play().catch(() => {}); };
+    ms.setActionHandler('play', blipOnce);
+    ms.setActionHandler('pause', blipOnce);
+  } catch (e) {}
+}
+
+let wake = null;
+async function keepAwake() {
+  try { wake = await navigator.wakeLock.request('screen'); } catch (e) {}
+}
+
+async function toggleEngine() {
+  await initAudio();
+  if (actx.state === 'suspended') await actx.resume();
+  if (!S.running) {
+    S.running = true; S.startT = performance.now() / 1000;
+    S.freeRpm = 0; S.gear = 0;
+    post({ on: true, starter: true });
+    keepAwake();
+    if (S.mode === 'gps') startGps();
+  } else {
+    S.running = false;
+    post({ on: false, starter: false, rpm: 0, load: 0, cut: false });
+  }
+  renderStart();
+}
+
+/* ---------- GPS ---------- */
+function hav(a, b) {
+  const R = 6371000, r = Math.PI / 180;
+  const dLa = (b.lat - a.lat) * r, dLo = (b.lon - a.lon) * r;
+  const h = Math.sin(dLa / 2) ** 2 + Math.cos(a.lat * r) * Math.cos(b.lat * r) * Math.sin(dLo / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+function startGps() {
+  if (G.watch !== null) return;
+  if (!('geolocation' in navigator)) { setGps('none'); return; }
+  setGps('wait');
+  try {
+    G.watch = navigator.geolocation.watchPosition(onFix, onGpsErr, { enableHighAccuracy: true, maximumAge: 0, timeout: 15000 });
+  } catch (e) { setGps('denied'); }
+}
+function stopGps() {
+  if (G.watch !== null) { navigator.geolocation.clearWatch(G.watch); G.watch = null; }
+  G.have = false; G.anchor = null; setGps('off');
+}
+function onFix(p) {
+  const t = performance.now() / 1000;
+  const c = p.coords, here = { lat: c.latitude, lon: c.longitude, t };
+  setGps(c.accuracy > 40 ? 'weak' : 'ok');
+  let z = c.speed, R;
+  G.hasSpeed = !(z == null || isNaN(z) || z < 0);
+  if (!G.hasSpeed) {
+    // No speed field: derive it from two positions about 1 s apart. Windows do not overlap,
+    // so each measurement carries independent error, and the filter trusts it less.
+    const old = G.anchor;
+    if (!old) { G.anchor = here; return; }
+    const base = t - old.t;
+    if (base < 0.9) return;
+    G.anchor = here;
+    if (base > 5) return; // too long a gap to say anything about speed
+    z = hav(old, here) / base + (G.have ? G.a * base / 2 : 0);
+    const pa = Math.max(2, Math.min(c.accuracy || 5, 20)) * 0.25;
+    R = (pa * 1.414 / base) ** 2;
+  } else {
+    R = 0.35 * 0.35;
+  }
+  if (!G.have) {
+    G.v = z; G.a = 0; G.P = [[R, 0], [0, 4]]; G.t = t; G.have = true;
+  } else {
+    const dt = Math.max(0.01, t - G.t), P = G.P;
+    G.gap += 0.2 * (Math.min(dt, 2) - G.gap); // typical time between fixes
+    // predict
+    let v = G.v + G.a * dt, a = G.a;
+    // slower receivers get a looser model so the estimate still reacts within one or two fixes
+    const q = JERK * Math.min(4, Math.max(1, G.gap / 0.1));
+    let p00 = P[0][0] + dt * (P[1][0] + P[0][1]) + dt * dt * P[1][1] + q * dt * dt * dt / 3;
+    let p01 = P[0][1] + dt * P[1][1] + q * dt * dt / 2;
+    let p10 = P[1][0] + dt * P[1][1] + q * dt * dt / 2;
+    let p11 = P[1][1] + q * dt;
+    // update with the measured speed
+    const y = z - v, Sx = p00 + R, k0 = p00 / Sx, k1 = p10 / Sx;
+    v += k0 * y; a += k1 * y;
+    G.P = [[(1 - k0) * p00, (1 - k0) * p01], [p10 - k1 * p00, p11 - k1 * p01]];
+    G.v = Math.max(0, v); G.a = Math.max(-10, Math.min(10, a)); G.t = t;
+  }
+}
+function onGpsErr(e) {
+  if (e.code === 1) { setGps('denied'); stopGpsWatchOnly(); }
+  else if (e.code === 3) setGps('wait');
+  else setGps('weak');
+}
+function stopGpsWatchOnly() {
+  if (G.watch !== null) { navigator.geolocation.clearWatch(G.watch); G.watch = null; }
+}
+const GPS_TEXT = {
+  off: ['GPS 未使用', ''],
+  wait: ['等待 GPS 定位…', 'warn'],
+  ok: ['GPS 已鎖定', 'good'],
+  weak: ['GPS 訊號弱', 'warn'],
+  denied: ['無法讀取位置', 'bad'],
+  none: ['此瀏覽器沒有 GPS', 'bad']
+};
+function setGps(s) {
+  S.gps = s;
+  const el = $('#gps');
+  let txt = GPS_TEXT[s][0];
+  if ((s === 'ok' || s === 'weak') && G.have) txt += ` · ${(1 / G.gap).toFixed(1)} Hz${G.hasSpeed ? '' : ' · 座標推算'}`;
+  if (el.textContent !== txt) el.textContent = txt;
+  el.dataset.state = GPS_TEXT[s][1];
+  $('#gpsHelp').hidden = s !== 'denied' && s !== 'none';
+}
+
+/* ---------- vehicle + gearbox ---------- */
+const car = () => CARS[S.car];
+const aMax = v => Math.min(car().a0, car().pm / Math.max(v, 1));
+const drag = v => 0.12 + 0.00045 * v * v;
+const rpmAt = (g, v) => v / TIRE * 60 * S.eng.gears[g] * S.eng.fd;
+
+function shift(dir, manualKey) {
+  const n = S.eng.gears.length, now = performance.now() / 1000;
+  if (manualKey && S.trans === 'auto') { S.trans = 'manual'; renderSeg(); }
+  const g = Math.max(0, Math.min(n - 1, S.gear + dir));
+  if (g === S.gear) return;
+  if (dir < 0 && rpmAt(g, S.v) > S.eng.redline * 1.02) return;
+  S.gear = g; S.lastShift = now; S.shiftDir = dir; S.loadAtShift = S.load;
+  if (dir < 0) S.blipUntil = now + 0.16;
+}
+function blipPulse() {
+  const now = performance.now() / 1000;
+  S.blip = true;
+  setTimeout(() => { S.blip = false; }, 220);
+  if (S.v > 0.5) S.blipUntil = now + 0.22;
+}
+
+let lastT = performance.now() / 1000;
+function tick() {
+  const now = performance.now() / 1000;
+  const dt = Math.min(0.1, now - lastT); lastT = now;
+  const e = S.eng, nG = e.gears.length;
+
+  // speed + load
+  let load;
+  if (S.mode === 'sim') {
+    S.thr += (S.thrIn - S.thr) * Math.min(1, dt * 7);
+    let a = S.thr * aMax(S.v) - (S.v > 0.1 ? drag(S.v) : 0) - S.brk * 7;
+    if (S.thr < 0.05 && S.v > 0.5) a -= 1.3;
+    S.v = Math.max(0, S.v + a * dt);
+    if (S.v === 0 && a < 0) a = 0;
+    S.a = a;
+    load = S.thr;
+  } else {
+    let vEst = 0;
+    if (G.have) vEst = Math.max(0, G.v + G.a * Math.min(now - G.t, G.gap + 0.3));
+    S.v += (vEst - S.v) * Math.min(1, dt * 15);
+    // with no fresh fix (tunnel, dropout) assume the car settles to a steady speed
+    const stale = G.have ? now - G.t - G.gap : 0;
+    S.a = G.have ? G.a * (stale > 0.5 ? Math.exp(-(stale - 0.5) / 0.4) : 1) : 0;
+    load = Math.max(0, Math.min(1, (S.a + drag(S.v)) / aMax(S.v) * 1.1));
+    // Overrun only when the car slows faster than it would just rolling (drag + engine braking),
+    // with hysteresis so a slight downhill at cruise does not crackle.
+    const coastDecel = drag(S.v) * 0.6 + 0.3;
+    // ...and only once it has kept slowing for a moment, so one noisy fix cannot crackle.
+    S.ovHold = S.a < -coastDecel ? S.ovHold + dt : 0;
+    if (!S.overrun && S.ovHold >= 0.12) S.overrun = true;
+    else if (S.overrun && S.a > -coastDecel * 0.5) S.overrun = false;
+    if (S.overrun) load = 0;
+    else if (S.v > 1 && load < 0.12) load = 0.12;
+  }
+  // standstill with hysteresis: GPS jitter of +-1 km/h at a red light must not engage a gear
+  const posOnly = S.mode === 'gps' && !G.hasSpeed;
+  if (!S.moving && S.v > (posOnly ? 2.0 : 1.2)) S.moving = true;
+  else if (S.moving && S.v < (posOnly ? 1.2 : 0.6)) S.moving = false;
+  if (!S.moving && S.mode === 'gps') load = 0;
+  if (!S.running) load = 0;
+  S.load += (load - S.load) * Math.min(1, dt * 8);
+  const L = S.load;
+  // shift points follow the pedal you held over the last moment, not every flicker of the estimate
+  S.peak = Math.max(L, S.peak - 0.6 * dt);
+  if (S.coast && L > 0.15) S.coast = false;
+  else if (!S.coast && L < 0.06) S.coast = true;
+
+  // gearbox
+  if (S.gear > nG - 1) S.gear = nG - 1;
+  const r0 = rpmAt(S.gear, S.v);
+  if (S.running && S.moving) {
+    if (S.trans === 'auto' && now - S.lastShift > 0.45) {
+      const up = e.idle + (e.redline * 0.96 - e.idle) * (0.22 + 0.78 * Math.pow(S.peak, 1.3));
+      const down = e.idle * 1.15 + e.redline * 0.45 * L * L;
+      const justUp = S.shiftDir > 0 && now - S.lastShift < 1.2 && L < S.loadAtShift + 0.3;
+      // Hysteresis: only shift into a gear that would not immediately want to shift back.
+      const rUp = S.gear < nG - 1 ? rpmAt(S.gear + 1, S.v) : 0;
+      const rDn = S.gear > 0 ? rpmAt(S.gear - 1, S.v) : Infinity;
+      const pedalHeld = !S.coast && L > S.peak - 0.15;
+      if (S.gear < nG - 1 && r0 > up && (pedalHeld || r0 > e.redline * 0.9) && rUp > down * 1.1 && rUp > e.idle * 1.05) {
+        shift(1);
+      } else if (S.gear > 0 && !justUp && r0 < down && rDn < up * 0.92 && rDn < e.redline * 0.92) {
+        let g = S.gear - 1;
+        if (L > 0.8) while (g > 0 && rpmAt(g - 1, S.v) < e.redline * 0.85 && rpmAt(g, S.v) < e.redline * 0.6) g--;
+        shift(g - S.gear);
+      }
+    } else if (S.trans === 'manual' && S.gear > 0 && r0 < e.idle * 0.8) {
+      shift(-1);
+    }
+  }
+  if (!S.moving && S.gear !== 0 && S.trans === 'auto') S.gear = 0;
+
+  // target rpm
+  let rpm, sendLoad = L, cut = false;
+  const sinceStart = now - S.startT;
+  if (!S.running) {
+    rpm = 0; sendLoad = 0;
+  } else if (sinceStart < 0.85) {
+    rpm = 230; sendLoad = 0.2;
+  } else {
+    if (!S.moving) {
+      if (S.freeRpm < e.idle) S.freeRpm = e.idle;
+      const rev = S.blip || (S.mode === 'sim' && S.thrIn > 0);
+      S.freeRpm += (rev ? 9000 : -3800) * dt;
+      const cap = e.redline * 0.72;
+      if (S.freeRpm >= cap) { S.freeRpm = cap - 150 * Math.random(); cut = true; }
+      S.freeRpm = Math.max(e.idle, S.freeRpm);
+      rpm = S.freeRpm;
+      sendLoad = rev ? 1 : (S.freeRpm > e.idle * 1.3 ? 0 : 0.08);
+    } else {
+      rpm = rpmAt(S.gear, S.v);
+      if (S.gear === 0 && L > 0.15) rpm = Math.max(rpm, e.idle + e.idle * 1.8 * L);
+      rpm = Math.max(rpm, e.idle);
+      S.freeRpm = rpm;
+    }
+    const flare = sinceStart < 3 ? Math.max(0, 1 - (sinceStart - 0.85) / 1.6) : 0;
+    rpm = Math.max(rpm, e.idle + flare * e.idle * 0.9);
+    if (now < S.blipUntil) { sendLoad = 0.75; rpm += 600; }
+    if (now - S.lastShift < 0.11 && S.shiftDir > 0 && L > 0.4) { cut = !!e.shiftPop; sendLoad = e.shiftPop ? 0 : L * 0.35; }
+    if (rpm >= e.redline) {
+      rpm = e.redline - 260 * ((now * 11) % 1);
+      cut = true;
+    }
+  }
+  S.rpm = rpm; S.cut = cut; S.sendLoad = sendLoad;
+  post({ rpm, load: sendLoad, cut, starter: S.running && sinceStart < 0.85 });
+}
+setInterval(tick, 20);
+
+/* ---------- tachometer ---------- */
+const cv = $('#tach'), g2 = cv.getContext('2d');
+let shownRpm = 0;
+function css(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+function draw() {
+  const rect = cv.getBoundingClientRect(), dpr = window.devicePixelRatio || 1;
+  const W = Math.max(10, Math.round(rect.width * dpr)), H = Math.max(10, Math.round(rect.height * dpr));
+  if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; }
+  const e = S.eng, max = Math.ceil((e.redline + 600) / 1000) * 1000;
+  shownRpm += (S.rpm - shownRpm) * 0.35;
+  const cx = W / 2, cy = H * 0.54, R = Math.min(W, H * 1.2) * 0.43;
+  const A0 = Math.PI * 0.75, SW = Math.PI * 1.5;
+  const ang = r => A0 + SW * Math.min(1.02, r / max);
+  g2.clearRect(0, 0, W, H);
+  const ink = css('--ink'), mute = css('--mute'), amber = css('--amber'), red = css('--red'), rim = css('--rim');
+  g2.lineCap = 'butt';
+  g2.lineWidth = R * 0.07; g2.strokeStyle = rim;
+  g2.beginPath(); g2.arc(cx, cy, R, A0, A0 + SW); g2.stroke();
+  g2.strokeStyle = red; g2.globalAlpha = 0.85;
+  g2.beginPath(); g2.arc(cx, cy, R, ang(e.redline), A0 + SW); g2.stroke(); g2.globalAlpha = 1;
+  g2.strokeStyle = amber; g2.globalAlpha = 0.9;
+  g2.beginPath(); g2.arc(cx, cy, R, A0, ang(Math.min(shownRpm, e.redline))); g2.stroke(); g2.globalAlpha = 1;
+  if (shownRpm > e.redline) { g2.strokeStyle = red; g2.beginPath(); g2.arc(cx, cy, R, ang(e.redline), ang(shownRpm)); g2.stroke(); }
+  for (let r = 0; r <= max; r += 500) {
+    const a = ang(r), major = r % 1000 === 0;
+    const r1 = R * (major ? 0.8 : 0.86), r2 = R * 0.9;
+    g2.strokeStyle = r >= e.redline ? red : (major ? ink : mute);
+    g2.lineWidth = major ? R * 0.022 : R * 0.012;
+    g2.beginPath(); g2.moveTo(cx + Math.cos(a) * r1, cy + Math.sin(a) * r1); g2.lineTo(cx + Math.cos(a) * r2, cy + Math.sin(a) * r2); g2.stroke();
+    if (major) {
+      g2.fillStyle = r >= e.redline ? red : ink;
+      g2.font = `600 ${Math.round(R * 0.11)}px ${css('--f-num')}`;
+      g2.textAlign = 'center'; g2.textBaseline = 'middle';
+      g2.fillText(String(r / 1000), cx + Math.cos(a) * R * 0.66, cy + Math.sin(a) * R * 0.66);
+    }
+  }
+  const na = ang(shownRpm);
+  g2.strokeStyle = amber; g2.lineWidth = R * 0.03; g2.lineCap = 'round';
+  g2.beginPath(); g2.moveTo(cx - Math.cos(na) * R * 0.12, cy - Math.sin(na) * R * 0.12); g2.lineTo(cx + Math.cos(na) * R * 0.93, cy + Math.sin(na) * R * 0.93); g2.stroke();
+  g2.fillStyle = css('--panel'); g2.beginPath(); g2.arc(cx, cy, R * 0.3, 0, Math.PI * 2); g2.fill();
+  g2.strokeStyle = rim; g2.lineWidth = R * 0.015; g2.stroke();
+  const gearTxt = !S.running ? '–' : (!S.moving && S.trans === 'auto') ? 'N' : (S.trans === 'manual' ? 'M' : '') + (S.gear + 1);
+  g2.fillStyle = S.cut ? red : ink;
+  g2.font = `700 ${Math.round(R * 0.3)}px ${css('--f-num')}`;
+  g2.textAlign = 'center'; g2.textBaseline = 'middle';
+  g2.fillText(gearTxt, cx, cy + R * 0.02);
+  g2.fillStyle = mute; g2.font = `500 ${Math.round(R * 0.075)}px ${css('--f-num')}`;
+  g2.fillText('× 1000 RPM', cx, cy + R * 0.48);
+  const lamps = 7, lw = R * 0.12, sx = cx - (lamps - 1) * lw * 0.7;
+  for (let i = 0; i < lamps; i++) {
+    const th = e.redline * (0.72 + i * 0.04);
+    const lit = S.running && shownRpm >= th;
+    g2.fillStyle = lit ? (i < 3 ? amber : red) : rim;
+    g2.beginPath(); g2.arc(sx + i * lw * 1.4, cy - R * 1.08, lw * 0.32, 0, Math.PI * 2); g2.fill();
+  }
+  $('#spd').textContent = Math.round(S.v * 3.6);
+  $('#rpmNum').textContent = S.running ? Math.round(shownRpm / 10) * 10 : 0;
+  $('#loadBar').style.transform = `scaleX(${S.running ? S.load.toFixed(3) : 0})`;
+  $('#loadTxt').textContent = !S.running ? '熄火' : S.cut ? '斷油' : S.load < 0.05 && shownRpm > S.eng.idle * 1.3 ? '收油回火' : S.load > 0.75 ? '全油門' : S.load > 0.2 ? '加速' : '巡航';
+  requestAnimationFrame(draw);
+}
+requestAnimationFrame(draw);
+
+/* ---------- UI ---------- */
+function renderEngines() {
+  const box = $('#engines');
+  box.innerHTML = '';
+  ENGINES.forEach(e => {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'eng'; b.id = 'eng-' + e.id;
+    b.setAttribute('aria-pressed', String(e === S.eng));
+    b.innerHTML = `<span class="eng-name"></span><span class="eng-meta"></span><span class="eng-note"></span>`;
+    b.querySelector('.eng-name').textContent = e.name;
+    b.querySelector('.eng-meta').textContent = `${e.power} · 紅線 ${e.redline.toLocaleString()} · ${e.box}`;
+    b.querySelector('.eng-note').textContent = e.note;
+    b.addEventListener('click', () => pickEngine(e));
+    box.appendChild(b);
+  });
+}
+function pickEngine(e) {
+  S.eng = e;
+  if (S.gear > e.gears.length - 1) S.gear = e.gears.length - 1;
+  post({ engine: e });
+  if (S.running) { S.startT = performance.now() / 1000 - 0.86; }
+  try { navigator.mediaSession.metadata = new MediaMetadata({ title: e.name, artist: '聲浪引擎' }); } catch (_) {}
+  document.querySelectorAll('.eng').forEach(b => b.setAttribute('aria-pressed', String(b.id === 'eng-' + e.id)));
+  save();
+}
+function renderStart() {
+  const b = $('#start');
+  b.textContent = S.running ? '熄火' : '發動引擎';
+  b.classList.toggle('on', S.running);
+}
+function renderSeg() {
+  document.querySelectorAll('[data-mode]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.mode === S.mode)));
+  document.querySelectorAll('[data-trans]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.trans === S.trans)));
+  $('#simPad').hidden = S.mode !== 'sim';
+  $('#upBtn').hidden = $('#downBtn').hidden = S.trans !== 'manual';
+}
+document.querySelectorAll('[data-mode]').forEach(b => b.addEventListener('click', () => {
+  S.mode = b.dataset.mode;
+  S.thrIn = 0; S.brk = 0;
+  if (S.mode === 'gps') { if (S.running) startGps(); else setGps('off'); }
+  else stopGps();
+  renderSeg(); save();
+}));
+document.querySelectorAll('[data-trans]').forEach(b => b.addEventListener('click', () => {
+  S.trans = b.dataset.trans; renderSeg(); save();
+}));
+$('#car').addEventListener('change', ev => { S.car = ev.target.value; save(); });
+$('#vol').addEventListener('input', ev => {
+  S.vol = +ev.target.value;
+  if (master) master.gain.setTargetAtTime(S.vol, actx.currentTime, 0.05);
+  save();
+});
+$('#start').addEventListener('click', toggleEngine);
+function hold(el, on, off) {
+  el.addEventListener('pointerdown', ev => { ev.preventDefault(); el.setPointerCapture?.(ev.pointerId); el.classList.add('down'); on(); });
+  ['pointerup', 'pointercancel', 'lostpointercapture'].forEach(t => el.addEventListener(t, () => { el.classList.remove('down'); off(); }));
+}
+hold($('#gas'), () => { S.thrIn = 1; }, () => { S.thrIn = 0; });
+hold($('#brake'), () => { S.brk = 1; }, () => { S.brk = 0; });
+hold($('#blip'), () => { S.blip = true; if (S.v > 0.5) S.blipUntil = performance.now() / 1000 + 0.25; }, () => { S.blip = false; });
+$('#upBtn').addEventListener('click', () => shift(1, true));
+$('#downBtn').addEventListener('click', () => shift(-1, true));
+const keys = {};
+addEventListener('keydown', ev => {
+  if (ev.target.closest && ev.target.closest('select,input')) return;
+  if (keys[ev.code]) return; keys[ev.code] = true;
+  if (ev.code === 'ArrowUp' || ev.code === 'KeyW') { if (S.mode === 'sim') S.thrIn = 1; ev.preventDefault(); }
+  else if (ev.code === 'ArrowDown' || ev.code === 'KeyS') { S.brk = 1; ev.preventDefault(); }
+  else if (ev.code === 'Space') { S.blip = true; ev.preventDefault(); }
+  else if (ev.code === 'ArrowRight' || ev.code === 'KeyE') shift(1, true);
+  else if (ev.code === 'ArrowLeft' || ev.code === 'KeyQ') shift(-1, true);
+});
+addEventListener('keyup', ev => {
+  keys[ev.code] = false;
+  if (ev.code === 'ArrowUp' || ev.code === 'KeyW') S.thrIn = 0;
+  else if (ev.code === 'ArrowDown' || ev.code === 'KeyS') S.brk = 0;
+  else if (ev.code === 'Space') S.blip = false;
+});
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && S.running) { keepAwake(); if (actx) actx.resume(); }
+});
+function save() {
+  try { localStorage.setItem('shenglang', JSON.stringify({ e: S.eng.id, m: S.mode, t: S.trans, c: S.car, v: S.vol })); } catch (e) {}
+}
+function load() {
+  try {
+    const d = JSON.parse(localStorage.getItem('shenglang') || 'null');
+    if (!d) return;
+    S.eng = ENGINES.find(x => x.id === d.e) || S.eng;
+    if (d.m) S.mode = d.m;
+    if (d.t) S.trans = d.t;
+    if (CARS[d.c]) S.car = d.c;
+    if (typeof d.v === 'number') S.vol = d.v;
+  } catch (e) {}
+}
+load();
+$('#car').value = S.car; $('#vol').value = S.vol;
+renderEngines(); renderSeg(); renderStart(); setGps('off');
+
+</script>
+</body>
+</html>

@@ -1,0 +1,155 @@
+<title>聲浪引擎</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Saira+Semi+Condensed:wght@500;600;700&family=Noto+Sans+TC:wght@400;500;700&display=swap">
+<style>
+/* Layout: instrument-cluster left (the gauge is the product), controls stacked right; single column on phones.
+   Deliberately single-theme: a night-cluster look with amber backlight, like the dial it imitates. */
+:root {
+  --bg: #111214;
+  --panel: #191a1d;
+  --rim: #2a2c30;
+  --ink: #ece8df;
+  --mute: #8d8f94;
+  --amber: #ffad1f;
+  --red: #ff4433;
+  --good: #57c98a;
+  --f-num: 'Saira Semi Condensed', 'Noto Sans TC', system-ui, sans-serif;
+  --f-body: 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', system-ui, sans-serif;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html, body { background: var(--bg); color: var(--ink); }
+body { font-family: var(--f-body); font-size: 15px; line-height: 1.55; padding-inline: 16px; padding-block: 12px 28px; }
+button, select, input { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; }
+
+.top { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; max-width: 1280px; margin: 0 auto 12px; }
+.brand { display: flex; align-items: baseline; gap: 10px; }
+.brand h1 { margin: 0; font-family: var(--f-body); font-weight: 700; font-size: 26px; letter-spacing: 0.08em; }
+.brand span { color: var(--mute); font-size: 13px; }
+.pill { font-size: 13px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--rim); color: var(--mute); display: inline-flex; align-items: center; gap: 6px; }
+.pill::before { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--rim); }
+.pill[data-state="good"] { color: var(--ink); } .pill[data-state="good"]::before { background: var(--good); }
+.pill[data-state="warn"]::before { background: var(--amber); }
+.pill[data-state="bad"] { color: var(--red); } .pill[data-state="bad"]::before { background: var(--red); }
+
+.grid { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 20px; max-width: 1280px; margin: 0 auto; }
+@media (max-width: 820px) { .grid { grid-template-columns: minmax(0, 1fr); } }
+
+.cluster { background: var(--panel); border: 1px solid var(--rim); border-radius: 18px; padding: 16px; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+#tach { width: 100%; aspect-ratio: 1.25 / 1; max-width: 100%; display: block; }
+.readout { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.read { display: flex; flex-direction: column; gap: 2px; }
+.read b { font-family: var(--f-num); font-weight: 600; font-size: 34px; line-height: 1; font-variant-numeric: tabular-nums; }
+.read small { color: var(--mute); font-size: 12px; letter-spacing: 0.06em; }
+.loadwrap { height: 6px; background: var(--rim); border-radius: 3px; overflow: hidden; margin-top: 10px; }
+#loadBar { height: 100%; background: var(--amber); transform-origin: left; transform: scaleX(0); transition: transform 80ms linear; }
+
+.pads { display: flex; gap: 10px; flex-wrap: wrap; }
+.pad { flex: 1 1 120px; min-height: 64px; border-radius: 12px; border: 1px solid var(--rim); background: var(--bg); font-size: 17px; font-weight: 700; letter-spacing: 0.1em; touch-action: none; user-select: none; -webkit-user-select: none; }
+.pad.down { background: var(--rim); }
+#gas { border-color: var(--amber); color: var(--amber); }
+#gas.down { background: var(--amber); color: var(--bg); }
+#brake.down { border-color: var(--red); color: var(--red); }
+.pad.small { flex: 1 1 90px; min-height: 52px; font-size: 15px; }
+
+.side { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+#start { min-height: 72px; border-radius: 999px; border: 2px solid var(--red); background: transparent; color: var(--ink); font-size: 20px; font-weight: 700; letter-spacing: 0.2em; }
+#start.on { background: var(--red); color: #fff; }
+.group { display: flex; flex-direction: column; gap: 8px; }
+.label { color: var(--mute); font-size: 12px; letter-spacing: 0.12em; }
+.seg { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; border: 1px solid var(--rim); border-radius: 10px; overflow: hidden; }
+.seg button { padding: 10px 8px; background: transparent; border: 0; border-right: 1px solid var(--rim); }
+.seg button:last-child { border-right: 0; }
+.seg button[aria-pressed="true"] { background: var(--rim); color: var(--amber); font-weight: 700; }
+.row2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+@media (max-width: 420px) { .row2 { grid-template-columns: minmax(0, 1fr); } }
+select { width: 100%; padding: 10px; border-radius: 10px; border: 1px solid var(--rim); background: var(--panel); }
+input[type=range] { width: 100%; accent-color: var(--amber); }
+
+#engines { display: flex; flex-direction: column; gap: 8px; }
+.eng { text-align: left; padding: 12px 14px; border-radius: 12px; border: 1px solid var(--rim); background: var(--panel); display: grid; gap: 2px; }
+.eng[aria-pressed="true"] { border-color: var(--amber); }
+.eng-name { font-weight: 700; font-size: 16px; }
+.eng[aria-pressed="true"] .eng-name { color: var(--amber); }
+.eng-meta { font-family: var(--f-num); font-size: 13px; color: var(--mute); font-variant-numeric: tabular-nums; }
+.eng-note { font-size: 13px; color: var(--mute); }
+
+.note { font-size: 13px; color: var(--mute); border-top: 1px solid var(--rim); padding-top: 12px; margin: 0; }
+.note b { color: var(--ink); font-weight: 500; }
+.help { font-size: 13px; border: 1px solid var(--red); border-radius: 10px; padding: 10px 12px; margin: 0; }
+kbd { font-family: var(--f-num); border: 1px solid var(--rim); border-radius: 4px; padding: 0 5px; font-size: 12px; }
+@media (prefers-reduced-motion: reduce) { #loadBar { transition: none; } }
+</style>
+
+<header class="top">
+  <div class="brand"><h1>聲浪</h1><span>給電動車的引擎聲</span></div>
+  <span class="pill" id="gps" data-state="">GPS 未使用</span>
+</header>
+
+<main class="grid">
+  <section class="cluster" aria-label="儀表">
+    <canvas id="tach" aria-label="轉速表"></canvas>
+    <div>
+      <div class="readout">
+        <div class="read"><b id="spd">0</b><small>KM/H</small></div>
+        <div class="read"><b id="rpmNum">0</b><small>RPM</small></div>
+        <div class="read"><b id="loadTxt" style="font-size:22px;line-height:1.55">熄火</b><small>引擎狀態</small></div>
+      </div>
+      <div class="loadwrap" aria-hidden="true"><div id="loadBar"></div></div>
+    </div>
+    <div class="pads" id="simPad">
+      <button class="pad" id="brake" type="button">煞車</button>
+      <button class="pad" id="gas" type="button">油門</button>
+    </div>
+    <div class="pads" id="manPad">
+      <button class="pad small" id="downBtn" type="button">− 降檔</button>
+      <button class="pad small" id="blip" type="button">補油</button>
+      <button class="pad small" id="upBtn" type="button">升檔 +</button>
+    </div>
+  </section>
+
+  <aside class="side">
+    <button id="start" type="button">發動引擎</button>
+
+    <div class="row2">
+      <div class="group">
+        <span class="label">速度來源</span>
+        <div class="seg" role="group" aria-label="速度來源">
+          <button type="button" data-mode="sim">模擬</button>
+          <button type="button" data-mode="gps">GPS</button>
+        </div>
+      </div>
+      <div class="group">
+        <span class="label">變速箱</span>
+        <div class="seg" role="group" aria-label="變速箱">
+          <button type="button" data-trans="auto">自排</button>
+          <button type="button" data-trans="manual">手排</button>
+        </div>
+      </div>
+    </div>
+
+    <p class="help" id="gpsHelp" hidden>這個畫面讀不到位置。GPS 模式要在你自己的 HTTPS 網址上開啟，並允許瀏覽器使用位置。在這之前可以先用「模擬」試聽。</p>
+
+    <div class="row2">
+      <label class="group"><span class="label">你的車</span>
+        <select id="car">
+          <option value="rwd">後驅標準版</option>
+          <option value="lr">長程雙馬達</option>
+          <option value="perf">Performance</option>
+        </select>
+      </label>
+      <label class="group"><span class="label">音量</span>
+        <input id="vol" type="range" min="0" max="1" step="0.01" value="0.7">
+      </label>
+    </div>
+
+    <div class="group">
+      <span class="label">引擎</span>
+      <div id="engines"></div>
+    </div>
+
+    <p class="note"><b>模擬模式</b>按住油門加速、放開就收油回火。鍵盤：<kbd>↑</kbd> 油門 <kbd>↓</kbd> 煞車 <kbd>空白</kbd> 補油 <kbd>←</kbd><kbd>→</kbd> 換檔。<br><b>在車上</b>用 GPS 模式，方向盤的上一首／下一首可以換檔，按一下是補油。</p>
+  </aside>
+</main>
